@@ -41,4 +41,26 @@ if Fizzy.saas?
   end
 end
 
+# Load .env file if it exists
+env_file = File.expand_path("../.env", __dir__)
+if File.file?(env_file)
+  File.readlines(env_file).each do |line|
+    line = line.strip
+    # Skip empty lines and comments
+    next if line.empty? || line.start_with?("#")
+
+    # Parse KEY=VALUE format
+    if line =~ /\A([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\z/
+      key = $1
+      value = $2
+
+      # Remove surrounding quotes if present
+      value = value.gsub(/\A['"]|['"]\z/, '')
+
+      # Only set if not already set (don't override existing ENV)
+      ENV[key] ||= value
+    end
+  end
+end
+
 load Gem.bin_path("kamal", "kamal")
