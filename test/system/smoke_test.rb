@@ -70,8 +70,13 @@ class SmokeTest < ApplicationSystemTestCase
     notification = notifications(:logo_mentioned_david)
 
     assert_selector "div##{dom_id(notification)}"
+    assert_selector "turbo-cable-stream-source[connected]", visible: :all
+    assert_no_selector "turbo-cable-stream-source:not([connected])", visible: :all
 
-    within_window(open_new_window) { visit card_url(notification.card) }
+    within_window(open_new_window) do
+      visit card_url(notification.card)
+      wait_for_notification_to_be_read(notification)
+    end
 
     assert_no_selector "div##{dom_id(notification)}"
   end
@@ -93,4 +98,11 @@ class SmokeTest < ApplicationSystemTestCase
     column_el.find(".cards__expander-count", text: cards_count + 1)
     assert_equal("Triage", card.reload.column.name)
   end
+
+  private
+    def wait_for_notification_to_be_read(notification)
+      Timeout.timeout(Capybara.default_max_wait_time) do
+        sleep 0.05 until notification.reload.read?
+      end
+    end
 end
