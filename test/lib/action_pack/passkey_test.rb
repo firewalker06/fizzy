@@ -17,30 +17,40 @@ class ActionPack::PasskeyTest < ActiveSupport::TestCase
   end
 
   test "authenticate with valid assertion" do
-    challenge = ActionPack::Passkey.request_options(credentials: [ @passkey ]).challenge
+    challenge = ActionPack::Passkey.authentication_options(credentials: [ @passkey ]).challenge
     assertion = build_assertion(challenge: challenge)
 
-    result = @passkey.authenticate(assertion, challenge: challenge)
+    result = @passkey.authenticate(assertion)
 
     assert_equal @passkey, result
   end
 
   test "authenticate returns nil with invalid signature" do
-    challenge = ActionPack::Passkey.request_options(credentials: [ @passkey ]).challenge
+    challenge = ActionPack::Passkey.authentication_options(credentials: [ @passkey ]).challenge
     assertion = build_assertion(challenge: challenge)
     assertion[:signature] = Base64.urlsafe_encode64("invalid", padding: false)
 
-    assert_nil @passkey.authenticate(assertion, challenge: challenge)
+    assert_nil @passkey.authenticate(assertion)
   end
 
   test "authenticate updates sign count and backed_up" do
-    challenge = ActionPack::Passkey.request_options(credentials: [ @passkey ]).challenge
+    challenge = ActionPack::Passkey.authentication_options(credentials: [ @passkey ]).challenge
     assertion = build_assertion(challenge: challenge, sign_count: 5, backed_up: true)
 
-    @passkey.authenticate(assertion, challenge: challenge)
+    @passkey.authenticate(assertion)
 
     assert_equal 5, @passkey.reload.sign_count
     assert @passkey.backed_up?
+  end
+
+  test "persists a spec-legal uint32-max sign count" do
+    # WebAuthn sign counts are unsigned 32-bit; the column must hold the full
+    # range. A signed INT4 column overflowed at 2147483647 with a RangeError.
+    max_uint32 = 4_294_967_295
+
+    @passkey.update!(sign_count: max_uint32)
+
+    assert_equal max_uint32, @passkey.reload.sign_count
   end
 
   test "to_public_key_credential" do

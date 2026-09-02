@@ -56,6 +56,115 @@ bin/dev --push
 
 This will ask for your 1Password authorization to fetch the push credentials. Note that this loads the **production** APNs and FCM credentials into your environment.
 
+## Attachment processing in a hotcell cell
+
+Image variants, blob analysis and PDF and video previews can run in an unprivileged sibling container with no network, instead of in the app process beside the database credentials. The cell lives in `saas/hotcell/` — its `Dockerfile`, its own `Gemfile`, its limits in `config.rb`, and the operations it serves.
+
+### Running it
+
+In SaaS mode `bin/dev` boots a cell beside the server, through `saas/Procfile.dev` and foreman. The cell runs uncontainerized, because a container cannot receive a file descriptor on macOS — Docker runs a Linux VM there and `SCM_RIGHTS` has nothing meaningful to hand across two kernels.
+
+```sh
+bin/dev            # the cell boots and carries attachment processing, as in production
+```
+
+`/hotcellz` says whether the cell is reachable. It asks the control socket only — `describe` and `metrics`, which the supervisor answers inline with no fork — and replies `OK` or `FAIL` with a 200 or a 503. It is unauthenticated so a monitor can poll it, and it says nothing else, because a stranger has no business knowing the cell's inventory or how loaded it is.
+
+`/hotcellz/test` is staff-only and returns the full diagnosis as JSON, including two round trips over the work socket, the socket that carries real files. The two prove different halves of it: `example.echo` reads its descriptor directly, while `example.reopen` re-opens it by name, which is what every operation that hands a tool a filename does. A cell whose group is wrong answers echo perfectly and fails reopen — so echo alone will tell you a broken cell is healthy. Each round trip forks a worker, which is why this is the half behind authentication.
+
+**A monitor therefore cannot see a broken work socket.** Only the round trips can, and they are staff-only. That is deliberate: it is a configuration error rather than something that degrades on its own, so run `/hotcellz/test` — or the `Cell.diagnostics(work: true)` runner — by hand whenever the configuration changes.
+
+Because the dev cell shells out to your laptop rather than to the image, every tool in `saas/hotcell/Dockerfile` needs a host equivalent. `bin/setup` installs them; if you add a tool to the image, add it to `.mise.toml` and the `Brewfile` too, or that operation will fail in development only.
+
+### The switches
+
+| variable | what it does | where it lives |
+| --- | --- | --- |
+| `HOTCELL_ROOT` | Registers the cell, which then carries every conversion. Unset, everything runs in the app. | `saas/config/deploy.yml` |
+| `HOTCELL_GROUP` | The gid the app and the cell share, so the cell can open a file the app hands it by name. Must match the `group-add` on the app's roles and the cell's own gid. Unset in development, where both sides run as one user. | `saas/config/deploy.yml` |
+
+### Building and shipping the image
+
+Kamal builds app images and not accessory images, so the cell's image has its own two scripts. They are separate so that building can happen anywhere and publishing is deliberate.
+
+```sh
+saas/hotcell/bin/build                        # locks the gem version, builds, pins deploy.yml to the tag
+saas/hotcell/bin/build --platform=linux/amd64 # what the hosts run
+saas/hotcell/bin/push                         # pushes that tag to the registry
+saas/hotcell/bin/check <destination>          # is that destination's accessory running the pinned tag?
+```
+
+**The tag is a content hash**, the first 12 characters of a SHA-256 over the `Dockerfile`, `Gemfile`,
+`Gemfile.lock`, `config.rb` and `operations/*.rb` — see `bin/image`. Not a git revision: the commit that
+bumps the gem and pins the result could never name itself, because amending it changed the SHA the pin was
+meant to hold. Identical bytes give an identical tag, and changing something the image does not contain
+leaves it alone. `saas/test/lib/hotcell_accessory_test.rb` holds the pin in `deploy.yml` equal to what the
+tree builds, so a stale pin fails in CI.
+
+**`build` locks the cell's `Gemfile.lock` to the hotcell version in the app's `Gemfile.saas.lock`**,
+writing it if the two differ, and then builds. The app's lockfile is the source of truth: a client and
+server one version apart is a `protocol` failure on every request. So move the gem in the application
+first, then build.
+
+**`build` also writes the pin in `saas/config/deploy.yml`**, and it belongs there rather than in `push`:
+the tag is a hash of the tree's contents, so the pin has to land in the same commit as the contents that
+produced it. `push` happens after that commit, so pinning there would leave every commit holding a stale
+pin. Both lockfiles, the operations, and the pin go in one change.
+
+Tags are immutable and there is no `latest`: a deploy does not update an accessory, so `bin/kamal accessory reboot hotcell -d <destination>` pulls whatever the tag names at that moment. A moving tag would make what a host runs depend on when it last rebooted.
+
+### The pre-deploy check
+
+Because a deploy never touches an accessory, an app that has been moved onto a cell can reach a host whose cell is still running an older pinned image, or no cell at all. `saas/hotcell/bin/check` is what `saas/.kamal/hooks/pre-deploy` runs to catch that, and it takes a destination so you can run it by hand at any time. `SKIP_HOTCELL_CHECKS=1` skips it in a deploy.
+
+It asks two questions in order, because they have different fixes:
+
+1. **Is the pinned tag in the registry?** `docker manifest inspect` locally, so it costs no ssh. Missing means nobody built and pushed this commit's cell, and the remedy is `build` (with `--platform=linux/amd64` when your docker host is not amd64), `push`, then `accessory reboot`.
+2. **Is the accessory running it?** `docker inspect` of the `<service>-hotcell` container on one randomly chosen host. The image is published by this point, so the remedy is only `bin/kamal accessory reboot hotcell` — never a build or a push.
+
+Either question failing for a reason that is not an answer — docker not logged in, ssh not getting through — is reported as the check failing rather than as a verdict on the cell. Telling someone to rebuild a published image because `docker manifest inspect` could not authenticate is the failure mode that costs the most.
+
+### Deploying the cell: the runbook
+
+Deploy the cell when anything under `saas/hotcell/` changes, or when the hotcell gems move in
+`Gemfile.saas.lock`. CI tells you when you owe one: `hotcell_accessory_test.rb` fails if the pin in
+`deploy.yml` no longer matches what the tree builds.
+
+1. Build the image and pin it:
+
+   ```sh
+   saas/hotcell/bin/build --platform=linux/amd64
+   ```
+
+2. Run the tests:
+
+   ```sh
+   bin/rails test saas/test/lib/hotcell_accessory_test.rb
+   ```
+
+3. Commit everything together: the lockfiles, the `saas/config/deploy.yml` pin, and whatever
+   changed under `saas/hotcell/`.
+
+4. Push the image:
+
+   ```sh
+   saas/hotcell/bin/push
+   ```
+
+5. Reboot the accessory on each destination:
+
+   ```sh
+   bin/kamal accessory reboot hotcell -d <destination>
+   ```
+
+6. Verify the destination: `/hotcellz` answers `OK`, `/hotcellz/test` (staff-only) passes all four
+   checks, `hotcell_up == 1` for every host in Prometheus, and no `WARN`/`ERROR` lines in Loki
+   under `{service_name="hotcell"}`.
+
+When the hotcell gems moved, the app has to be deployed too — the usual rollout, separate from
+this one. A client and server more than one revision apart fail every request with a `protocol`
+error, so keep the two close together.
+
 ## Environments
 
 Fizzy is deployed with [Kamal](https://kamal-deploy.org/). You'll need to have the 1Password CLI set up in order to access the secrets that are used when deploying. Provided you have that, it should be as simple as `bin/kamal deploy` to the correct environment.
@@ -74,20 +183,33 @@ This environment uses a FlashBlade bucket for blob storage.
 
 Beta is primarily intended for testing product features. It uses the same production database and Active Storage configuration.
 
-There are 4 beta environments:
+There is 1 beta environment:
 
 - https://beta1.fizzy-beta.com
-- https://beta2.fizzy-beta.com
-- https://beta3.fizzy-beta.com
-- https://beta4.fizzy-beta.com
 
-Deploy with: `bin/kamal deploy -d beta1` (or `-d beta2`, `-d beta3`, `-d beta4`)
+Deploy with: `bin/kamal deploy -d beta1`
 
 ### Staging
 
 Staging is primarily intended for testing infrastructure changes. It uses production-like but separate database and Active Storage configurations.
 
 - https://app.fizzy-staging.com/
+
+## Maintenance mode
+
+To take production offline for maintenance, run `kamal-proxy stop` on the load balancers via `knife ssh`:
+
+```bash
+knife ssh 'hostname:fizzy-lb-*' "sudo docker exec fizzy-load-balancer kamal-proxy stop fizzy --message='Sorry! Fizzy is undergoing some maintenance and will be back shortly.'"
+```
+
+Verify maintenance is enabled by visiting https://app.fizzy.do/.
+
+To lift maintenance mode:
+
+```bash
+knife ssh 'hostname:fizzy-lb-*' 'sudo docker exec fizzy-load-balancer kamal-proxy resume fizzy'
+```
 
 ## License
 

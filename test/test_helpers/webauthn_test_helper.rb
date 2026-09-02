@@ -20,21 +20,20 @@ module WebauthnTestHelper
     [ "a363666d74646e6f6e656761747453746d74a068617574684461746158a4" ].pack("H*")
 
   private
-    def request_webauthn_challenge
-      untenanted { post my_passkey_challenge_url }
+    def request_webauthn_challenge(purpose: "authentication")
+      untenanted { post my_passkey_challenge_url, params: { purpose: purpose } }
       response.parsed_body["challenge"]
     end
 
-    def webauthn_challenge
-      ActionPack::WebAuthn::PublicKeyCredential::Options.new.challenge
+    def webauthn_challenge(purpose: nil)
+      ActionPack::WebAuthn::PublicKeyCredential::Options.new(challenge_purpose: purpose).challenge
     end
 
     def webauthn_private_key
       WEBAUTHN_PRIVATE_KEY
     end
 
-    def build_attestation_params(challenge:)
-      credential_id = SecureRandom.random_bytes(32)
+    def build_attestation_params(challenge:, credential_id: SecureRandom.random_bytes(32))
       auth_data = build_attestation_auth_data(credential_id: credential_id)
 
       {

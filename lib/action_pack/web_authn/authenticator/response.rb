@@ -23,7 +23,6 @@
 #     authenticator_data: authenticator_data,
 #     signature: signature,
 #     credential: credential,
-#     challenge: ActionPack::WebAuthn::Current.challenge,
 #     origin: "https://example.com",
 #     user_verification: :required
 #   )
@@ -34,9 +33,9 @@ class ActionPack::WebAuthn::Authenticator::Response
   include ActiveModel::Validations
 
   attr_reader :client_data_json
-  attr_accessor :challenge, :origin, :user_verification
+  attr_accessor :origin, :user_verification
 
-  validate :challenge_must_match
+  validate :challenge_must_be_present
   validate :challenge_must_not_be_expired
   validate :origin_must_match
   validate :must_not_be_cross_origin
@@ -45,9 +44,15 @@ class ActionPack::WebAuthn::Authenticator::Response
   validate :user_must_be_present
   validate :user_must_be_verified_when_required
 
-  def initialize(client_data_json:, challenge: nil, origin: nil, user_verification: :preferred)
+  def initialize(client_data_json:, origin: nil, user_verification: :preferred)
+    # Strong parameters permit scalars, so a JSON request body can deliver a
+    # non-string here (e.g. a number or object). Reject it at the boundary
+    # rather than crashing later on JSON.parse/#encoding with an uncaught error.
+    unless client_data_json.is_a?(String)
+      raise ActionPack::WebAuthn::InvalidResponseError, "Client data is missing or malformed"
+    end
+
     @client_data_json = client_data_json
-    @challenge = challenge
     @origin = origin
     @user_verification = user_verification.to_sym
   end
@@ -64,9 +69,15 @@ class ActionPack::WebAuthn::Authenticator::Response
   end
 
   # Parses the client data JSON string into a Hash. Raises
-  # +InvalidResponseError+ if the JSON is malformed.
+  # +InvalidResponseError+ if the JSON is malformed or is not a JSON object
+  # (anything other than an object would break the field lookups below with an
+  # uncaught TypeError).
   def client_data
-    @client_data ||= JSON.parse(client_data_json)
+    @client_data ||= JSON.parse(client_data_json).tap do |parsed|
+      unless parsed.is_a?(Hash)
+        raise ActionPack::WebAuthn::InvalidResponseError, "Client data is not a JSON object"
+      end
+    end
   rescue JSON::ParserError
     raise ActionPack::WebAuthn::InvalidResponseError, "Client data is not valid JSON"
   end
@@ -76,26 +87,35 @@ class ActionPack::WebAuthn::Authenticator::Response
   end
 
   private
-    def challenge_must_match
-      if challenge.blank?
+    def challenge_must_be_present
+      if client_data["challenge"].blank?
         errors.add(:base, "Challenge missing")
-      elsif client_data["challenge"].blank?
-        errors.add(:base, "Challenge missing in client data")
-      elsif !ActiveSupport::SecurityUtils.secure_compare(challenge.to_s, client_data["challenge"].to_s)
-        errors.add(:base, "Challenge does not match")
       end
     end
 
     def challenge_must_not_be_expired
-      return if errors.any? || challenge.blank?
+      return if errors.any?
+
+      challenge = client_data["challenge"]
+
+      # A non-string challenge (object/array/number) would blow up Base64
+      # decoding with an uncaught error; reject it as invalid.
+      unless challenge.is_a?(String)
+        errors.add(:base, "Challenge is invalid")
+        return
+      end
 
       signed_message = Base64.urlsafe_decode64(challenge)
 
-      unless ActionPack::WebAuthn.challenge_verifier.verified(signed_message)
+      unless ActionPack::WebAuthn.challenge_verifier.verified(signed_message, purpose: challenge_purpose)
         errors.add(:base, "Challenge has expired")
       end
     rescue ArgumentError
       errors.add(:base, "Challenge is invalid")
+    end
+
+    def challenge_purpose
+      nil
     end
 
     def origin_must_match
@@ -115,7 +135,9 @@ class ActionPack::WebAuthn::Authenticator::Response
     end
 
     def must_not_have_token_binding
-      if client_data.dig("tokenBinding", "status") == "present"
+      token_binding = client_data["tokenBinding"]
+
+      if token_binding.is_a?(Hash) && token_binding["status"] == "present"
         errors.add(:base, "Token binding is not supported")
       end
     end

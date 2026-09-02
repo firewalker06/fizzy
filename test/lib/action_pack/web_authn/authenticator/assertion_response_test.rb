@@ -6,7 +6,7 @@ class ActionPack::WebAuthn::Authenticator::AssertionResponseTest < ActiveSupport
   setup do
     ActionPack::WebAuthn::Current.host = "example.com"
 
-    @challenge = webauthn_challenge
+    @challenge = webauthn_challenge(purpose: "authentication")
     @origin = "https://example.com"
     @client_data_json = {
       challenge: @challenge,
@@ -27,7 +27,6 @@ class ActionPack::WebAuthn::Authenticator::AssertionResponseTest < ActiveSupport
       authenticator_data: @authenticator_data,
       signature: @signature,
       credential: @credential,
-      challenge: @challenge,
       origin: @origin
     )
   end
@@ -44,6 +43,57 @@ class ActionPack::WebAuthn::Authenticator::AssertionResponseTest < ActiveSupport
     end
   end
 
+  test "raises for a non-string signature or authenticator data instead of a 500" do
+    assert_raises(ActionPack::WebAuthn::InvalidResponseError) do
+      ActionPack::WebAuthn::Authenticator::AssertionResponse.new(
+        client_data_json: @client_data_json,
+        authenticator_data: @authenticator_data,
+        signature: 123, # scalar from a JSON request body
+        credential: @credential,
+        origin: @origin
+      )
+    end
+
+    assert_raises(ActionPack::WebAuthn::InvalidResponseError) do
+      ActionPack::WebAuthn::Authenticator::AssertionResponse.new(
+        client_data_json: @client_data_json,
+        authenticator_data: { not: "a string" },
+        signature: @signature,
+        credential: @credential,
+        origin: @origin
+      )
+    end
+  end
+
+  test "rejects an oversized Base64 authenticator data before decoding it" do
+    max_encoded = ActionPack::WebAuthn::CborDecoder::MAX_SIZE / 3 * 4 + 4
+    oversized = "A" * (max_encoded + 1)
+
+    error = assert_raises(ActionPack::WebAuthn::InvalidResponseError) do
+      ActionPack::WebAuthn::Authenticator::Data.wrap(oversized)
+    end
+
+    assert_equal "Authenticator data is too large", error.message
+  end
+
+  test "accepts a predecoded Authenticator::Data instance, preserving Data.wrap's documented input" do
+    # A library caller may decode once and hand the response an existing
+    # Authenticator::Data (Data.wrap returns it as-is). The malformed-input
+    # guard must not reject that supported branch.
+    data = ActionPack::WebAuthn::Authenticator::Data.wrap(@authenticator_data)
+
+    response = ActionPack::WebAuthn::Authenticator::AssertionResponse.new(
+      client_data_json: @client_data_json,
+      authenticator_data: data,
+      signature: @signature,
+      credential: @credential,
+      origin: @origin
+    )
+
+    assert_same data, response.authenticator_data
+    assert_nothing_raised { response.validate! }
+  end
+
   test "validate! raises when type is not webauthn.get" do
     client_data_json = {
       challenge: @challenge,
@@ -56,7 +106,6 @@ class ActionPack::WebAuthn::Authenticator::AssertionResponseTest < ActiveSupport
       authenticator_data: @authenticator_data,
       signature: sign(@authenticator_data, client_data_json),
       credential: @credential,
-      challenge: @challenge,
       origin: @origin
     )
 
@@ -73,7 +122,6 @@ class ActionPack::WebAuthn::Authenticator::AssertionResponseTest < ActiveSupport
       authenticator_data: @authenticator_data,
       signature: Base64.urlsafe_encode64("invalid-signature", padding: false),
       credential: @credential,
-      challenge: @challenge,
       origin: @origin
     )
 
@@ -84,14 +132,28 @@ class ActionPack::WebAuthn::Authenticator::AssertionResponseTest < ActiveSupport
     assert_equal "Invalid signature", error.message
   end
 
-  test "validate! raises when challenge does not match" do
-    @response.challenge = "wrong-challenge"
+  test "validate! raises when challenge in client data is invalid" do
+    client_data_json = {
+      challenge: "not-a-valid-signed-challenge",
+      origin: @origin,
+      type: "webauthn.get"
+    }.to_json
+
+    authenticator_data = build_authenticator_data(user_verified: true)
+
+    response = ActionPack::WebAuthn::Authenticator::AssertionResponse.new(
+      client_data_json: client_data_json,
+      authenticator_data: authenticator_data,
+      signature: sign(authenticator_data, client_data_json),
+      credential: @credential,
+      origin: @origin
+    )
 
     error = assert_raises(ActionPack::WebAuthn::InvalidResponseError) do
-      @response.validate!
+      response.validate!
     end
 
-    assert_equal "Challenge does not match", error.message
+    assert_match /Challenge (is invalid|has expired)/, error.message
   end
 
   test "validate! raises when origin does not match" do
@@ -111,7 +173,6 @@ class ActionPack::WebAuthn::Authenticator::AssertionResponseTest < ActiveSupport
       authenticator_data: authenticator_data,
       signature: sign(authenticator_data, @client_data_json),
       credential: @credential,
-      challenge: @challenge,
       origin: @origin,
       user_verification: :preferred
     )
@@ -128,7 +189,6 @@ class ActionPack::WebAuthn::Authenticator::AssertionResponseTest < ActiveSupport
       authenticator_data: authenticator_data,
       signature: sign(authenticator_data, @client_data_json),
       credential: @credential,
-      challenge: @challenge,
       origin: @origin,
       user_verification: :required
     )
@@ -145,7 +205,6 @@ class ActionPack::WebAuthn::Authenticator::AssertionResponseTest < ActiveSupport
       authenticator_data: authenticator_data,
       signature: sign(authenticator_data, @client_data_json),
       credential: @credential,
-      challenge: @challenge,
       origin: @origin,
       user_verification: :required
     )
