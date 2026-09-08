@@ -9,7 +9,7 @@ class Identity < ApplicationRecord
   has_many :users, dependent: :nullify
   has_many :accounts, through: :users
 
-  has_one_attached :avatar
+  has_one_attached :avatar, dependent: :purge_later
 
   before_destroy :deactivate_users, prepend: true
 
@@ -32,6 +32,10 @@ class Identity < ApplicationRecord
 
   def users_with_active_accounts
     users.joins(:account).merge(Account.active).includes(:account)
+  end
+
+  def close_remote_connections(reconnect: false)
+    users.find_each { |user| user.close_remote_connections(reconnect:) }
   end
 
   private

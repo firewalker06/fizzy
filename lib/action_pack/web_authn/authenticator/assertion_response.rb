@@ -17,7 +17,6 @@
 #     authenticator_data: params[:response][:authenticatorData],
 #     signature: params[:response][:signature],
 #     credential: credential.to_public_key_credential,
-#     challenge: ActionPack::WebAuthn::Current.challenge,
 #     origin: "https://example.com"
 #   )
 #
@@ -39,6 +38,16 @@ class ActionPack::WebAuthn::Authenticator::AssertionResponse < ActionPack::WebAu
 
   def initialize(credential:, authenticator_data:, signature:, **attributes)
     super(**attributes)
+
+    # A request delivers signature and authenticator_data as serialized Strings;
+    # reject scalars that would crash on #encoding before decoding. But
+    # Data.wrap also accepts an already-decoded Authenticator::Data (returned
+    # as-is), which library callers pass — keep that documented branch reachable.
+    unless signature.is_a?(String) &&
+        (authenticator_data.is_a?(String) || authenticator_data.is_a?(ActionPack::WebAuthn::Authenticator::Data))
+      raise ActionPack::WebAuthn::InvalidResponseError, "Assertion response is missing or malformed"
+    end
+
     @credential = credential
     @signature = signature
     @signature = Base64.urlsafe_decode64(@signature) unless @signature.encoding == Encoding::BINARY
@@ -48,6 +57,10 @@ class ActionPack::WebAuthn::Authenticator::AssertionResponse < ActionPack::WebAu
   end
 
   private
+    def challenge_purpose
+      "authentication"
+    end
+
     def client_data_type_must_be_get
       unless client_data["type"] == "webauthn.get"
         errors.add(:base, "Client data type is not webauthn.get")

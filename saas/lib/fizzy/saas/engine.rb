@@ -3,6 +3,8 @@ require_relative "true_client_ip"
 require_relative "signup"
 require_relative "authorization"
 require_relative "gvl_instrumentation"
+require_relative "cell"
+require_relative "unprocessable_attachments"
 require_relative "../../rails_ext/active_record_tasks_database_tasks.rb"
 
 module Fizzy
@@ -45,6 +47,29 @@ module Fizzy
 
       initializer "fizzy_saas.gvl_instrumentation" do |app|
         app.config.middleware.insert_before(Rack::Runtime, GvlInstrumentation)
+      end
+
+      # Before active_storage.configs, which is where Active Storage reads these settings off config.
+      initializer "fizzy_saas.hotcell", before: "active_storage.configs" do |app|
+        Cell.register!
+
+        app.config.active_storage.merge! Cell.active_storage_configuration
+      end
+
+      # to_prepare rather than after_initialize, for the same reason the client gem's retry hook is: the
+      # job classes live in a reloadable engine and are redefined on every code reload, and a discard_on
+      # applied once at boot would silently vanish after the first file save in development.
+      initializer "fizzy_saas.unprocessable_attachments" do |app|
+        app.config.to_prepare do
+          UnprocessableAttachments.install!
+        end
+      end
+
+      # Warns when this process is outside HOTCELL_GROUP, and when the timeout is too tight for what the
+      # cell says it may take. Never fails boot: a cell that is restarting is a degraded deployment, not a
+      # broken one.
+      config.after_initialize do
+        ::HotCell.describe_cells
       end
 
       initializer "fizzy_saas.solid_queue" do
@@ -90,6 +115,34 @@ module Fizzy
         end
       end
 
+      # Rails edge (actioncable 647ce6769c, 2026-05-28) extracted WebSocket handling
+      # into ActionCable::Server::Socket, which now calls connection.handle_open /
+      # handle_close *publicly*. sentry-rails (through 6.7.0 and master as of 2026-08)
+      # still prepends these onto ActionCable::Connection::Base as `private`, matching
+      # the old internal calling convention, so the external call raises NoMethodError
+      # and every WebSocket connection dies. Restore public visibility on Sentry's
+      # module until sentry-ruby adapts to the refactor.
+      #
+      # sentry-rails prepends its module via on_load(:action_cable_connection), which
+      # fires lazily when ActionCable::Connection::Base first loads. Register our own
+      # hook so it runs right after Sentry's (on_load callbacks fire in registration
+      # order); doing it from after_initialize guarantees ours queues after Sentry's.
+      # Remove once https://github.com/getsentry/sentry-ruby ships a compatible release.
+      config.after_initialize do
+        ActiveSupport.on_load(:action_cable_connection) do
+          if defined?(Sentry::Rails::ActionCableExtensions::Connection)
+            Sentry::Rails::ActionCableExtensions::Connection.class_eval do
+              # Guard per method: a future sentry-rails may rename/remove one, and calling
+              # `public` on an undefined method raises NameError — which would break SaaS
+              # boot here. Only flip the visibility of methods that actually exist.
+              %i[ handle_open handle_close ].each do |method|
+                public method if method_defined?(method) || private_method_defined?(method)
+              end
+            end
+          end
+        end
+      end
+
       initializer "fizzy_saas.yabeda" do
         require "prometheus/client/support/puma"
 
@@ -112,6 +165,15 @@ module Fizzy
         require "yabeda/gvl"
         Yabeda::GVL.install!
 
+        require "yabeda/active_support_cache"
+        Yabeda::ActiveSupportCache.install!
+
+        require "yabeda/solid_cache"
+        Yabeda::SolidCache.install!
+
+        require "yabeda/hot_cell"
+        Yabeda::HotCell.install!
+
         require_relative "metrics"
       end
 
@@ -133,7 +195,7 @@ module Fizzy
       end
 
       config.to_prepare do
-        ::Account.include Account::StorageLimited
+        ::Account.include Account::QueenbeeIntegration, Account::StorageLimited
         ::Identity.include Authorization::Identity, Identity::Devices
         ::Session.include Session::Devices
         ::Signup.prepend Signup

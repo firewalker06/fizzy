@@ -1,5 +1,9 @@
 source "https://rubygems.org"
 
+# Fail loudly when bundling under the wrong Ruby rather than silently
+# re-resolving the lockfile against its native-gem version caps.
+ruby file: ".ruby-version"
+
 git_source(:bc) { |repo| "https://github.com/basecamp/#{repo}" }
 
 gem "rails", github: "rails/rails", branch: "main"
@@ -13,26 +17,27 @@ gem "turbo-rails", github: "hotwired/turbo-rails", branch: "offline-cache"
 # Deployment and drivers
 gem "bootsnap", require: false
 gem "kamal", require: false
-gem "puma", ">= 5.0"
-gem "solid_cable", ">= 3.0"
+gem "puma", "~> 8.0"
+gem "solid_cable", github: "rails/solid_cable"
 gem "solid_cache", "~> 1.0"
-gem "solid_queue", "~> 1.3"
+gem "solid_queue", github: "rails/solid_queue"
 gem "sqlite3", ">= 2.0"
 gem "thruster", require: false
-gem "trilogy", "~> 2.10"
+gem "trilogy", "~> 2.12"
 
 # Features
-gem "bcrypt", "~> 3.1.7"
+gem "bcrypt", "~> 3.1.22"
 gem "geared_pagination", "~> 1.2"
 gem "rqrcode"
 gem "rouge"
 gem "jbuilder"
-gem "lexxy", "0.9.0.beta"
+gem "lexxy", "0.9.31"
 gem "image_processing", "~> 1.14"
 gem "platform_agent"
 gem "aws-sdk-s3", require: false
 gem "web-push"
 gem "net-http-persistent"
+gem "surfguard", bc: "surfguard" # The SSRF address policy behind webhook and push delivery
 gem "zip_kit"
 gem "mittens"
 gem "useragent", bc: "useragent"
@@ -59,8 +64,9 @@ end
 
 group :test do
   gem "capybara"
-  gem "selenium-webdriver"
-  gem "webmock"
-  gem "vcr"
+  gem "minitest-reporters", require: false
   gem "mocha"
+  gem "selenium-webdriver"
+  gem "vcr"
+  gem "webmock"
 end
