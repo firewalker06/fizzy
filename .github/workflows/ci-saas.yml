@@ -14,6 +14,7 @@ jobs:
       saas: false
   test_saas:
     name: Test (SaaS)
+    if: github.repository_owner == 'basecamp'
     uses: ./.github/workflows/test.yml
     with:
       saas: true
