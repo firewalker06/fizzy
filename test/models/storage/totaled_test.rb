@@ -85,13 +85,27 @@ class Storage::TotaledTest < ActiveSupport::TestCase
     assert_equal 0, @account.storage_total.pending_entries.count
   end
 
-  test "materialize_storage updates cursor to latest entry" do
-    entry1 = Storage::Entry.record(account: @account, delta: 1000, operation: "attach")
-    entry2 = Storage::Entry.record(account: @account, delta: 500, operation: "attach")
+  test "materialize_storage uses the highest UUID for entries from the same millisecond" do
+    # UUIDv7 random bits can put entries from one millisecond out of insertion order.
+    entry1 = Storage::Entry.create! \
+      id: ActiveRecord::Type::Uuid.hex_to_base36("0190000000007fffbfffffffffffffff"),
+      account: @account, delta: 1000, operation: "attach"
+    entry2 = Storage::Entry.create! \
+      id: ActiveRecord::Type::Uuid.hex_to_base36("01900000000070008000000000000000"),
+      account: @account, delta: 500, operation: "attach"
 
     @account.materialize_storage
 
-    assert_equal entry2.id, @account.storage_total.last_entry_id
+    assert_operator entry1.id, :>, entry2.id
+    assert_equal entry1.id, @account.storage_total.last_entry_id
+    assert_equal 1500, @account.bytes_used
+    assert_equal 1500, @account.bytes_used_exact
+    assert_empty @account.storage_total.pending_entries
+
+    @account.materialize_storage
+
+    assert_equal entry1.id, @account.storage_total.last_entry_id
+    assert_equal 1500, @account.bytes_used
   end
 
   test "materialize_storage is idempotent when no new entries" do
