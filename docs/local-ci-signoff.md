@@ -20,7 +20,7 @@ adds `signoff/`. They are not installed or attested by this change.
 | Local secret scan | fizzy-gitleaks | `bin/gitleaks-audit` |
 | Checks / Lint | fizzy-lint | `bin/rubocop` |
 | Checks / Lint, agent docs | fizzy-agent-docs | `script/check_agents_docs` |
-| Checks / GitHub Actions audit | fizzy-actions | `zizmor --no-progress .github/workflows` |
+| Checks / GitHub Actions audit | fizzy-actions | `zizmor --no-progress .` |
 | Setup contract | fizzy-setup | `test/setup-phases-test` (synthetic command stubs) |
 | OSS / SQLite | fizzy-oss-sqlite | `bin/rails db:setup test` |
 | OSS / SQLite system | fizzy-oss-sqlite-system | `PARALLEL_WORKERS=1 bin/rails test:system` |
@@ -57,8 +57,16 @@ before a full suite run. Never use production credentials or user data.
 Required tools include Ruby from `.ruby-version`, Bundler, SQLite, MySQL
 8.4, Chrome and its driver, libvips, ffmpeg, mise, gitleaks and zizmor.
 Security audits also need current advisory and importmap audit data.
-Pin and record the zizmor engine version before claiming parity: hosted
-CI pins an action wrapper, not a local engine version.
+The pinned hosted action resolves its `latest` input through its own
+`support/versions` file. At action commit
+`3dc1ecc9bcb9e94e9b2c709687979e1298497054`, that entry is the same digest as
+zizmor 1.29.0. Use the official [zizmor installation instructions](https://docs.zizmor.sh/installation/)
+and install `zizmor==1.29.0` in an external task-local Python environment.
+Record the installed version. Audit `.` to include the Dependabot config,
+which the hosted action also collects. Supply `GH_TOKEN` through the process
+environment for online audits, as the hosted action does. Never print the
+token. An offline run does not prove online parity. A newer engine can add
+findings; keep that result separate from the hosted engine result.
 
 ## Named commit operation
 

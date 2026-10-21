@@ -10,7 +10,7 @@ CI.run do
   step "Setup", "bin/setup --skip-server"
 
   step "Docs: agent instructions", "script/check_agents_docs"
-  step "Security: GitHub Actions audit", "zizmor --no-progress .github/workflows"
+  step "Security: GitHub Actions audit", "zizmor --no-progress ."
 
   step "Style: Ruby", "bin/rubocop -f simple"
 
