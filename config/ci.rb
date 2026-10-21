@@ -10,6 +10,7 @@ CI.run do
   step "Setup", "bin/setup --skip-server"
 
   step "Docs: agent instructions", "script/check_agents_docs"
+  step "Security: GitHub Actions audit", "zizmor --no-progress .github/workflows"
 
   step "Style: Ruby", "bin/rubocop -f simple"
 
@@ -32,7 +33,7 @@ CI.run do
   end
 
   if success?
-    step "Signoff: All systems go. Ready for merge and deploy.", "gh signoff"
+    puts "Local checks passed. Full database parity and merge signoff are separate gates; see docs/local-ci-signoff.md."
   else
     failure "Signoff: CI failed. Do not merge or deploy.", "Fix the issues and try again."
   end
