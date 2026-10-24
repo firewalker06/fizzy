@@ -27,6 +27,7 @@ GEM
     ruby-vips (2.3.0)
       ffi (~> 1.12)
       logger
+    zlib (3.2.4)
 
 PLATFORMS
   aarch64-linux-gnu
@@ -44,6 +45,7 @@ PLATFORMS
 DEPENDENCIES
   activestorage-hotcell-server (~> 0.3.0)
   hotcell-server (~> 0.3.0)
+  zlib (>= 3.2.3)
 
 CHECKSUMS
   activestorage-hotcell-server (0.3.0) sha256=e82db5cc602651ca4ce49486cf19c7c01e86cdeddb7105106b3aca50ae67f98b
@@ -65,6 +67,7 @@ CHECKSUMS
   logger (1.7.0) sha256=196edec7cc44b66cfb40f9755ce11b392f21f7967696af15d274dde7edff0203
   mini_magick (5.3.3) sha256=b3beed8a8cef36bd03666365f14b89cd344da0ecd373af53e617c71bfd426aab
   ruby-vips (2.3.0) sha256=e685ec02c13969912debbd98019e50492e12989282da5f37d05f5471442f5374
+  zlib (3.2.4) sha256=a0d0e5845a18d839c078fb5b6e4ae523ffb918601c2004a77c081ee211f9b038
 
 BUNDLED WITH
   4.0.18

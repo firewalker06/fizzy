@@ -519,6 +519,7 @@ GEM
       nokogiri (~> 1.8)
     zeitwerk (2.8.3)
     zip_kit (6.3.4)
+    zlib (3.2.4)
 
 PLATFORMS
   aarch64-linux
@@ -580,6 +581,7 @@ DEPENDENCIES
   web-push
   webmock
   zip_kit
+  zlib (>= 3.2.3)
 
 CHECKSUMS
   action_text-trix (2.1.19) sha256=7012f59421009cf284aa651294896414d653a61a2417c9b8714c8476d2f74009
@@ -775,9 +777,10 @@ CHECKSUMS
   xpath (3.2.0) sha256=6dfda79d91bb3b949b947ecc5919f042ef2f399b904013eb3ef6d20dd3a4082e
   zeitwerk (2.8.3) sha256=2c85125a8467ce069e20123d1e709a08955c9d29c118c25b46b7b7fafdbb92e5
   zip_kit (6.3.4) sha256=407c6d39feef818678fae2d129077bd2f920c9806072af3482e671eeae3c48ea
+  zlib (3.2.4) sha256=a0d0e5845a18d839c078fb5b6e4ae523ffb918601c2004a77c081ee211f9b038
 
 RUBY VERSION
-  ruby 3.4.8
+  ruby 3.4.12
 
 BUNDLED WITH
   4.0.18

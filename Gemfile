@@ -70,3 +70,6 @@ group :test do
   gem "vcr"
   gem "webmock"
 end
+
+# Fixed GzipReader buffer handling (CVE-2026-27820).
+gem "zlib", ">= 3.2.3"

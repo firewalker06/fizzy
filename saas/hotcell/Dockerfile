@@ -1,14 +1,14 @@
 # The cell's image. Everything here is inside the blast radius, so treat this file as a budget rather
 # than an inventory.
 
-ARG RUBY_VERSION=3.4
+ARG RUBY_VERSION=3.4.12
 
 # The bundle is built in a stage of its own, because installing it needs a compiler for the native
 # extensions, which the image that runs untrusted bytes must not carry.
 FROM ruby:${RUBY_VERSION}-slim AS build
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends build-essential pkg-config && \
+    apt-get install -y --no-install-recommends build-essential pkg-config zlib1g-dev && \
     rm -rf /var/lib/apt/lists/*
 
 ENV BUNDLE_PATH=/hotcell/bundle \
@@ -24,7 +24,7 @@ RUN bundle install && rm -rf "$BUNDLE_PATH"/ruby/*/cache
 FROM ruby:${RUBY_VERSION}-slim
 
 # The upgrade applies Debian's pending security patches. `docker build --pull` takes the newest
-# `ruby:3.4-slim` tag, but that tag can sit behind an advisory already in `trixie-security` until
+# `ruby:3.4.12-slim` tag, but that tag can sit behind an advisory already in `trixie-security` until
 # docker-library/ruby rebuilds it, so a clean build can ship a fixable High no rebuild of the cell would
 # clear. Upgrading here makes the patch level this image's own rather than upstream's release cadence.
 #
