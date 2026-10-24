@@ -2,6 +2,7 @@ name: CI (SaaS)
 
 on:
   push:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -9,13 +10,13 @@ permissions:
 jobs:
   test_oss:
     name: Test (OSS)
-    uses: ./.github/workflows/test.yml
+    uses: $/.github/workflows/test.yml
     with:
       saas: false
   test_saas:
     name: Test (SaaS)
     if: github.repository_owner == 'basecamp'
-    uses: ./.github/workflows/test.yml
+    uses: $/.github/workflows/test.yml
     with:
       saas: true
     secrets:
